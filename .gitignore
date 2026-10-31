@@ -1,0 +1,29 @@
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── 构建产物（PyInstaller onedir）─────────────────────────
+build/
+dist/
+dist-debug/
+
+# ── 用户数据：真实项目库 / 设置 / 报告，绝不入库 ──────────
+data/
+
+# ── 发布安装包：作为 GitHub Release 资产上传，不进 git ────
+release/
+
+# ── 编辑器 / 操作系统 ───────────────────────────────────
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# ── 本地测试残留 ─────────────────────────────────────────
+settings.ini
+*.log

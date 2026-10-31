@@ -1,0 +1,4 @@
+# 行尾：.bat 与 .iss 必须是 CRLF（否则中文在 cmd / Inno Setup 里乱码或解析出错）
+* text=auto
+*.bat text eol=crlf
+*.iss text eol=crlf

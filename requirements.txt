@@ -1,0 +1,6 @@
+# GUI framework (LGPL - friendly for future commercial features)
+# Essentials 包含 QtWidgets/QtCore/QtGui，体积远小于完整 PySide6
+PySide6-Essentials>=6.8
+
+# Excel 报告导出
+openpyxl>=3.1

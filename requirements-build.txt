@@ -1,0 +1,3 @@
+# 构建工具链（仅 build.bat / scripts/build.py 使用，run.bat 不需要）
+# 注意：不要合并进 requirements.txt，否则每次启动应用都要装打包工具
+pyinstaller>=6.0
