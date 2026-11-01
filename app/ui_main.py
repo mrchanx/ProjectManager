@@ -545,11 +545,12 @@ class NewProjectDialog(QDialog):
             self.cmb_tpl.addItem(label, key)
         for t in db.list_templates():          # 自定义模板（模板管理里保存的）
             self.cmb_tpl.addItem("%s（自定义）" % t["name"], ("custom", t["id"]))
-        self.cmb_tpl.setCurrentIndex(1)
+        # 默认空白项目：不给任何人预置流程，模板由用户自己选
+        self.cmb_tpl.setCurrentIndex(0)
         self.cmb_tpl.currentIndexChanged.connect(self._tpl_changed)
         self.spin_units = QSpinBox()
         self.spin_units.setRange(0, 999)
-        self.spin_units.setValue(10)
+        self.spin_units.setValue(0)
         self.spin_units.setToolTip("本批有几个弹性体/传感器就填几个，0 = 不启用个体跟踪")
         self.ed_sn_prefix = QLineEdit("SN-")
         form.addRow("项目名称*", self.ed_name)
@@ -562,8 +563,11 @@ class NewProjectDialog(QDialog):
         form.addRow(btn)
 
     def _tpl_changed(self, idx):
-        # 换成空白模板时清零个体；六维力模板默认 10 个
-        if self.cmb_tpl.itemData(idx) != "six_axis":
+        # 空白/自定义模板默认不启用个体；六维力模板按 10 个带出来
+        if self.cmb_tpl.itemData(idx) == "six_axis":
+            if self.spin_units.value() == 0:
+                self.spin_units.setValue(10)
+        else:
             self.spin_units.setValue(0)
 
     def values(self):
@@ -1364,7 +1368,7 @@ class MainWindow(QMainWindow):
         self.act_stages.setShortcut("Ctrl+G")
         self.act_stages.triggered.connect(self.stage_manage)
         self.act_del = QAction("删除当前任务", self)
-        self.act_del.triggered.connect(self.delete_task)
+        self.act_del.triggered.connect(lambda _c=False: self.delete_task())
         m_task.addActions([self.act_add, self.act_units, self.act_stages,
                            self.act_del])
 
@@ -1409,6 +1413,8 @@ class MainWindow(QMainWindow):
         act_new.triggered.connect(self.new_project)
         self.act_add_tb = QAction("添加任务", self)
         self.act_add_tb.triggered.connect(self.add_task)
+        self.act_del_tb = QAction("删除任务", self)
+        self.act_del_tb.triggered.connect(lambda _c=False: self.delete_task())
         self.act_units_tb = QAction("批次个体", self)
         self.act_units_tb.triggered.connect(self.manage_units)
         self.act_tpl_tb = QAction("模板管理", self)
@@ -1417,8 +1423,8 @@ class MainWindow(QMainWindow):
         act_rep.triggered.connect(self.export_html)
         act_open = QAction("打开文件", self)
         act_open.triggered.connect(self.open_file_link)
-        tb.addActions([act_new, self.act_add_tb, self.act_units_tb,
-                       self.act_tpl_tb, act_rep, act_open])
+        tb.addActions([act_new, self.act_add_tb, self.act_del_tb,
+                       self.act_units_tb, self.act_tpl_tb, act_rep, act_open])
         self.addToolBar(tb)
 
     def _build_central(self):
@@ -1431,9 +1437,9 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.itemSelectionChanged.connect(self.on_tree_selected)
-        # 阶段抬头（顶层项）右键 → 上移/下移/重命名/删除，不用再开 Ctrl+G 对话框
+        # 右键：阶段抬头 → 上移/下移/重命名/删除；任务行 → 删除/添加任务
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.tree.customContextMenuRequested.connect(self._tree_stage_menu)
+        self.tree.customContextMenuRequested.connect(self._tree_menu)
         vl2.addWidget(self.tree)
 
         # ---- 中央：四视图 ----
@@ -1452,6 +1458,8 @@ class MainWindow(QMainWindow):
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemSelectionChanged.connect(self.on_table_selected)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._table_menu)
         # 个体矩阵：行=个体，列=任务；双击循环状态，右键选全部状态。
         # 支持像 Excel 一样多选：Ctrl+左键 点选不连续格子、按住左键拖出矩形块、
         # Shift+左键 选范围 —— 然后右键一次性把状态刷给所有选中的格子。
@@ -1675,6 +1683,8 @@ class MainWindow(QMainWindow):
             has = bool(self.project_id)
             self.act_add.setEnabled(has)
             self.act_add_tb.setEnabled(has)
+            if hasattr(self, "act_del_tb"):
+                self.act_del_tb.setEnabled(has)
             if hasattr(self, "act_units"):
                 self.act_units.setEnabled(has)
             if hasattr(self, "act_stages"):
@@ -1782,10 +1792,44 @@ class MainWindow(QMainWindow):
         self._ensure_stages_registered()
         return db.list_stages(self.project_id) if self.project_id else []
 
+    def _tree_menu(self, pos):
+        """任务树右键分发：阶段抬头 → 阶段操作；任务行 → 删除/添加；空白 → 新建。"""
+        if not self.project_id:
+            return
+        it = self.tree.itemAt(pos)
+        if it is None:
+            m = QMenu(self)
+            a_stage = m.addAction("新建阶段…")
+            a_stage.triggered.connect(lambda _c=False: self.add_stage_inline())
+            a_task = m.addAction("添加任务…")
+            a_task.triggered.connect(lambda _c=False: self.add_task())
+            m.exec(self.tree.viewport().mapToGlobal(pos))
+            return
+        if it.parent() is None:
+            self._tree_stage_menu(pos)
+            return
+        tid = it.data(0, Qt.UserRole)
+        if not tid:
+            return
+        # 删除按右键的那一行来，不依赖之前选中的是谁
+        self._task_menu(tid).exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _task_menu(self, tid):
+        """任务行右键菜单（只构建不弹，方便测试）。tid 为空时删除项禁用。"""
+        m = QMenu(self)
+        a_del = m.addAction("删除任务")
+        if tid is None:
+            a_del.setEnabled(False)
+        else:
+            a_del.triggered.connect(lambda _c=False, t=tid: self.delete_task(t))
+        a_add = m.addAction("添加任务…")
+        a_add.triggered.connect(lambda _c=False: self.add_task())
+        return m
+
     def _tree_stage_menu(self, pos):
         """任务树里右键阶段抬头：上移 / 下移 / 重命名 / 删除 / 新建阶段。
 
-        顺序就是任务树、流程图、报告里的分组顺序；点在任务行或空白处不弹。
+        顺序就是任务树、流程图、报告里的分组顺序。
         """
         if not self.project_id:
             return
@@ -2225,6 +2269,18 @@ class MainWindow(QMainWindow):
             tid = items[0].data(Qt.UserRole)
             if tid:
                 QTimer.singleShot(0, lambda tid=tid: self.select_task(tid))
+
+    def _table_menu(self, pos):
+        """表格右键：删除右键那一行的任务（顺手选中它，方便接着改）。"""
+        if not self.project_id:
+            return
+        row = self.tbl.rowAt(pos.y())
+        tid = None
+        if row >= 0:
+            it = self.tbl.item(row, 0)
+            if it:
+                tid = it.data(Qt.UserRole)
+        self._task_menu(tid).exec(self.tbl.viewport().mapToGlobal(pos))
 
     # ---------------- 个体矩阵视图 ----------------
 
@@ -2915,16 +2971,23 @@ class MainWindow(QMainWindow):
         dlg = TemplateManageDialog(self, self.project, self.tasks)
         dlg.exec()
 
-    def delete_task(self):
-        t = self._current_task()
+    def delete_task(self, tid=None):
+        """删除任务。tid 为空时删当前选中的；右键菜单直接传那一行的 id。"""
+        t = None
+        if tid is None:
+            t = self._current_task()
+        else:
+            t = next((x for x in self.tasks if x["id"] == tid), None)
         if not t:
             QMessageBox.information(self, "提示", "请先选择一个任务")
             return
         ret = QMessageBox.question(
-            self, "确认删除", "确定删除任务「%s」？" % t["name"])
+            self, "确认删除", "确定删除任务「%s」？" % t["name"],
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if ret == QMessageBox.Yes:
             db.delete_task(t["id"])
-            self.selected_tid = None
+            if self.selected_tid == t["id"]:
+                self.selected_tid = None
             self.refresh_task_views()
 
     def _prompt_text(self, title, label):

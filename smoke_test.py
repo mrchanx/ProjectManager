@@ -162,8 +162,9 @@ def main():
     dlg_p = NewProjectDialog()
     dlg_p.ed_name.setText("对话框测试项目")
     n, code, tpl_key, units_n, sn_prefix = dlg_p.values()
-    assert n == "对话框测试项目" and units_n == 10 and sn_prefix == "SN-", \
-        "新建项目对话框取值错误: %s" % ((n, units_n, sn_prefix),)
+    assert (n == "对话框测试项目" and tpl_key == "blank" and units_n == 0
+            and sn_prefix == "SN-"), \
+        "新建项目对话框取值错误: %s" % ((n, tpl_key, units_n, sn_prefix),)
     print("[ok] 对话框-新建项目: 取值正常")
 
     dlg_t = NewTaskDialog(win, win.tasks, default_stage="电路设计")
@@ -1079,18 +1080,26 @@ def main():
     win.refresh_projects(select_id=pid)
     print("[ok] 项目下拉框: 向下弹出 + 限高10行 + 滚动条")
 
-    # 6) 报告（含个体章节）
-    project = db.get_project(pid)
-    html_path = report.export_html(project, win.tasks)
-    assert os.path.exists(html_path) and os.path.getsize(html_path) > 2000
-    with open(html_path, encoding="utf-8") as f:
-        content = f.read()
-    assert "批次个体进度" in content and "SN-01" in content, "报告缺个体章节"
-    assert "nowrap" in content and "测试任务X&lt;1&gt;" not in content or True
-    print("[ok] HTML 报告: %s" % html_path)
-    xlsx_path = report.export_excel(project, win.tasks)
-    assert xlsx_path and os.path.exists(xlsx_path)
-    print("[ok] Excel 报告: %s" % xlsx_path)
+    # 6) 报告（含个体章节）—— 输出到临时目录，别往用户的 data/reports 里堆
+    from app import paths as _paths
+    _orig_rep = _paths.REPORT_DIR
+    _tmp_rep = tempfile.mkdtemp(prefix="pm_smoke_report_")
+    _paths.REPORT_DIR = _tmp_rep
+    try:
+        project = db.get_project(pid)
+        html_path = report.export_html(project, win.tasks)
+        assert os.path.exists(html_path) and os.path.getsize(html_path) > 2000
+        with open(html_path, encoding="utf-8") as f:
+            content = f.read()
+        assert "批次个体进度" in content and "SN-01" in content, "报告缺个体章节"
+        assert "nowrap" in content and "测试任务X&lt;1&gt;" not in content or True
+        print("[ok] HTML 报告: %s" % html_path)
+        xlsx_path = report.export_excel(project, win.tasks)
+        assert xlsx_path and os.path.exists(xlsx_path)
+        print("[ok] Excel 报告: %s" % xlsx_path)
+    finally:
+        _paths.REPORT_DIR = _orig_rep
+        shutil.rmtree(_tmp_rep, ignore_errors=True)
 
     # 7) 全量导出 → 删除 → 导入回环
     exp_path = os.path.join(os.path.dirname(db.DB_PATH), "_smoke_export.json")
@@ -1395,6 +1404,61 @@ def main():
         _ui.QMessageBox = orig_mb
         db.delete_project(tmp_pid)
     print("[ok] 新建项目对话框: 重名提示「已存在」并留在对话框 + 名称去首尾空白")
+
+    # 10.2) 新建项目默认空白模板（用户要求：不要再默认套六维力产研流程）
+    d = _ui.NewProjectDialog(win)
+    assert d.cmb_tpl.currentData() == "blank", \
+        "新建项目默认应为空白模板，实际 %r" % (d.cmb_tpl.currentData(),)
+    assert d.spin_units.value() == 0, \
+        "空白项目默认个体数应为 0，实际 %d" % d.spin_units.value()
+    idx_six = next(i for i in range(d.cmb_tpl.count())
+                   if d.cmb_tpl.itemData(i) == "six_axis")
+    d.cmb_tpl.setCurrentIndex(idx_six)
+    assert d.spin_units.value() == 10, \
+        "切到六维力模板应带出 10 个个体，实际 %d" % d.spin_units.value()
+    print("[ok] 新建项目: 默认空白模板 + 个体 0，切六维力模板带出 10")
+
+    # 10.3) 删除任务入口（树/表格右键 + 工具栏）+ 依赖引用清理
+    _pid = db.create_project("任务删除回归项目", "", "blank", [])
+    try:
+        _a = db.add_task(_pid, {"stage": "", "name": "删除A", "order_idx": 0})
+        _b = db.add_task(_pid, {"stage": "", "name": "删除B", "order_idx": 1,
+                                "depends_on": str(_a)})
+        win.refresh_projects(select_id=_pid)
+        assert win.act_del_tb.isEnabled(), "有项目时工具栏删除应可用"
+        assert win.act_del.isEnabled(), "任务菜单里的删除项应始终可用"
+        m_none = win._task_menu(None)
+        assert not m_none.actions()[0].isEnabled(), "没点到任务行时删除项应禁用"
+        m_tid = win._task_menu(_a)
+        assert m_tid.actions()[0].text() == "删除任务", "任务右键菜单缺「删除任务」"
+        assert m_tid.actions()[0].isEnabled(), "点中任务时删除项应可用"
+
+        class _FakeMB:
+            Yes = 1
+            No = 0
+
+            @staticmethod
+            def question(*a, **k):
+                return 1
+
+            @staticmethod
+            def information(*a, **k):
+                pass
+
+        orig_mb = _ui.QMessageBox
+        _ui.QMessageBox = _FakeMB
+        try:
+            win.delete_task(_a)          # 按 id 删，不要求先选中
+        finally:
+            _ui.QMessageBox = orig_mb
+        names = [t["name"] for t in db.list_tasks(_pid)]
+        assert "删除A" not in names, "任务没删掉: %s" % names
+        left_b = [t for t in db.list_tasks(_pid) if t["id"] == _b][0]
+        assert _a not in db.task_dep_ids(left_b), \
+            "删除后其它任务的 depends_on 里仍有悬空 id: %r" % (left_b["depends_on"],)
+    finally:
+        db.delete_project(_pid)
+    print("[ok] 删除任务: 树/表格右键 + 工具栏入口，按右键行删除且清理依赖")
 
     print("[done] 全部冒烟测试通过")
 

@@ -8,8 +8,8 @@ env/
 
 # ── 构建产物（PyInstaller onedir）─────────────────────────
 build/
-dist/
-dist-debug/
+dist*/
+
 
 # ── 用户数据：真实项目库 / 设置 / 报告，绝不入库 ──────────
 data/

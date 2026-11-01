@@ -459,8 +459,24 @@ def update_task(tid, field, value):
 
 
 def delete_task(tid):
+    """删除任务，并清掉其它任务 depends_on 里对它的引用。
+
+    depends_on 是逗号分隔的 id 文本，没有外键约束；不清理的话剩下的任务
+    会指向一个已不存在的 id，流程图/甘特图找节点时找不到，依赖列会出现
+    空名字，卡点判断也会失准。
+    """
     conn = get_conn()
     conn.execute("DELETE FROM tasks WHERE id=?", (tid,))
+    token = str(tid)
+    rows = conn.execute(
+        "SELECT id, depends_on FROM tasks WHERE depends_on LIKE ?",
+        ("%" + token + "%",)).fetchall()
+    for r in rows:
+        parts = [p.strip() for p in (r["depends_on"] or "").split(",") if p.strip()]
+        kept = [p for p in parts if p != token]
+        if kept != parts:
+            conn.execute("UPDATE tasks SET depends_on=? WHERE id=?",
+                         (",".join(kept), r["id"]))
     conn.commit()
     conn.close()
 

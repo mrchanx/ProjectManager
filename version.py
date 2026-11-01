@@ -31,7 +31,7 @@ APP_NAME = "ProjectManager"
 
 # 正式版版本号（唯一版本源）。
 # 出正式版时 release.bat 只改这一行；出调试版时**不改动它**（调试版跟随此号）。
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 
 # 调试版尾缀标记（SemVer 预发布标识）：1.3.5-debug.2
 DEBUG_TAG = "debug"

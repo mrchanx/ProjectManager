@@ -243,8 +243,9 @@ def export_excel(project, tasks, path=None):
 
     d = build_report_data(project, tasks)
     if not path:
-        out_dir = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), "data", "reports")
+        # 与 HTML 报告保持一致：走 paths.REPORT_DIR（安装版在 %LOCALAPPDATA%，
+        # 硬编码到程序目录在 Program Files 下会写不进去）
+        out_dir = str(paths.REPORT_DIR)
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, "报告_%s_%s.xlsx" % (
             project["name"], datetime.now().strftime("%Y%m%d_%H%M%S")))
